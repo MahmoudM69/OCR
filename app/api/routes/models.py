@@ -100,14 +100,6 @@ async def switch_model(request: SwitchModelRequest):
             detail=f"Unknown model: {request.model}. Use GET /models to list available models.",
         )
 
-    # Validate model files exist
-    model_path = settings.models_dir / request.model
-    if not model_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Model files not found for: {request.model}",
-        )
-
     # Get previous model and set new one in Redis
     client = get_redis_client()
     previous = get_current_model_from_redis()

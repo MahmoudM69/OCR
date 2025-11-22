@@ -1,32 +1,56 @@
 # OCR API
 
-Asynchronous OCR processing API with runtime model switching.
+Asynchronous OCR processing API with runtime model switching and GPU support.
 
 ## Features
 
+- **Multiple OCR Engines**: GOT-OCR, QARI (Arabic), DeepSeek-OCR
 - **Async Processing**: Submit images and poll for results or receive webhooks
-- **Multiple Models**: Support for different OCR engines via plugin interface
 - **Runtime Switching**: Switch OCR models without restarting the service
-- **Docker Ready**: Complete docker-compose setup with Redis
+- **GPU Accelerated**: CUDA support with quantized models (4-bit/8-bit)
+- **Docker Ready**: Complete docker-compose setup with Redis and HuggingFace cache
+
+## Available Models
+
+| Model | ID | Best For | Quantization |
+|-------|-----|----------|--------------|
+| **QARI** | `qari` | Arabic text (default) | 8-bit |
+| **GOT-OCR 2.0** | `got` | General printed text | 4-bit |
+| **DeepSeek** | `deepseek` | Multilingual documents | 4-bit |
 
 ## Quick Start
 
+### 1. Build the base image (one-time, caches dependencies)
 ```bash
-# Create model directory for mock engine
-mkdir -p data/models/mock
+docker build -f Dockerfile.base -t ocr-base:latest .
+```
 
-# Start all services
+### 2. Start all services
+```bash
 docker-compose up -d
+```
 
-# Check health
+### 3. Check health
+```bash
 curl http://localhost:8000/health
+```
 
-# Submit an image for OCR
+### 4. Submit an image for OCR
+```bash
 curl -X POST http://localhost:8000/ocr \
   -F "file=@image.png"
+```
 
-# Check job status
+### 5. Check job status
+```bash
 curl http://localhost:8000/ocr/{job_id}
+```
+
+### 6. Switch models
+```bash
+curl -X POST http://localhost:8000/models/switch \
+  -H "Content-Type: application/json" \
+  -d '{"model": "got"}'
 ```
 
 ## API Endpoints
@@ -50,41 +74,15 @@ curl http://localhost:8000/ocr/{job_id}
                                                ▼
                                         ┌─────────────┐
                                         │   Worker    │
-                                        │ (RQ + OCR)  │
+                                        │ (GPU + OCR) │
+                                        └─────────────┘
+                                               │
+                                               ▼
+                                        ┌─────────────┐
+                                        │  HF Cache   │
+                                        │  (Models)   │
                                         └─────────────┘
 ```
-
-## Adding New OCR Engines
-
-1. Create a new file in `app/ocr/` (e.g., `tesseract.py`)
-2. Implement the `BaseOCREngine` interface:
-
-```python
-from app.ocr.base import BaseOCREngine, OCRResult
-from app.ocr.registry import OCREngineRegistry
-
-@OCREngineRegistry.register
-class TesseractEngine(BaseOCREngine):
-    @property
-    def name(self) -> str:
-        return "tesseract"
-
-    async def load(self) -> None:
-        # Load model from self.model_path
-        self._loaded = True
-
-    async def unload(self) -> None:
-        # Clean up resources
-        self._loaded = False
-
-    async def extract_text(self, image_path: Path) -> OCRResult:
-        self._ensure_loaded()
-        # Perform OCR
-        return OCRResult(text="...", confidence=0.95)
-```
-
-3. Import it in `app/ocr/__init__.py`
-4. Place model files in `data/models/{engine_name}/`
 
 ## Configuration
 
@@ -96,18 +94,27 @@ Environment variables:
 | `REDIS_PORT` | 6379 | Redis port |
 | `MODELS_DIR` | /app/data/models | Models directory |
 | `UPLOADS_DIR` | /app/data/uploads | Uploads directory |
+| `DEFAULT_MODEL` | qari | Default OCR model |
 | `JOB_TIMEOUT` | 300 | Job timeout in seconds |
-| `WEBHOOK_TIMEOUT` | 30 | Webhook timeout in seconds |
+
+## GPU Requirements
+
+- NVIDIA GPU with CUDA 12.4+ support
+- Minimum 8GB VRAM recommended
+- Docker with NVIDIA Container Toolkit
 
 ## Development
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Build base image
+docker build -f Dockerfile.base -t ocr-base:latest .
 
-# Run API locally
-uvicorn app.main:app --reload
+# Build and start services
+docker-compose up --build
 
-# Run worker locally
-rq worker --url redis://localhost:6379/0
+# View logs
+docker-compose logs -f worker
+
+# Stop services
+docker-compose down
 ```

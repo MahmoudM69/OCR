@@ -102,9 +102,9 @@ class OCRModelManager:
             if not OCREngineRegistry.is_registered(model_name):
                 raise ValueError(f"No engine registered for model: {model_name}")
 
+            # Model path for any local caching (models download from HuggingFace)
             model_path = self.models_dir / model_name
-            if not model_path.exists():
-                raise ValueError(f"Model directory not found: {model_path}")
+            model_path.mkdir(parents=True, exist_ok=True)
 
             engine = OCREngineRegistry.create_engine(model_name, model_path)
             if engine is None:
@@ -181,9 +181,9 @@ class OCRModelManager:
         if not OCREngineRegistry.is_registered(model_name):
             raise ValueError(f"No engine registered for model: {model_name}")
 
+        # Model path for any local caching (models download from HuggingFace)
         model_path = self.models_dir / model_name
-        if not model_path.exists():
-            raise ValueError(f"Model directory not found: {model_path}")
+        model_path.mkdir(parents=True, exist_ok=True)
 
         # Wait for current processing to finish
         wait_time = 0.0

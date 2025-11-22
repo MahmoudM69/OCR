@@ -16,3 +16,13 @@ pydantic-settings==2.2.1
 
 # Utilities
 python-dotenv==1.0.1
+pillow
+reportlab
+
+# ML/AI (core - installed in base image)
+# torch, transformers, accelerate, bitsandbytes are in base
+
+# Engine-specific dependencies
+tiktoken==0.6.0
+verovio==4.3.1
+qwen-vl-utils

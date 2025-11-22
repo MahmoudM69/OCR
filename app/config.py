@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     webhook_timeout: int = 30
     webhook_max_retries: int = 3
 
+    # Default OCR model
+    default_model: str = "qari"
+
     @property
     def redis_url(self) -> str:
         return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
