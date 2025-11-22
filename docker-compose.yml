@@ -1,0 +1,43 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MODELS_DIR=/app/data/models
+      - UPLOADS_DIR=/app/data/uploads
+      - DEBUG=false
+    volumes:
+      - ./data/models:/app/data/models
+      - ./data/uploads:/app/data/uploads
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: rq worker --url redis://redis:6379/0
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MODELS_DIR=/app/data/models
+      - UPLOADS_DIR=/app/data/uploads
+    volumes:
+      - ./data/models:/app/data/models
+      - ./data/uploads:/app/data/uploads
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
