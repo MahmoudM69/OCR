@@ -7,6 +7,9 @@ class ModelInfo(BaseModel):
     name: str
     is_loaded: bool = False
     is_available: bool = True
+    status: str = "not_found"  # not_found, downloading, ready, failed
+    progress: float = 0.0  # Download progress 0-100
+    message: str = ""  # Error or status message
 
 
 class ModelsListResponse(BaseModel):
@@ -14,6 +17,7 @@ class ModelsListResponse(BaseModel):
 
     models: list[ModelInfo]
     current_model: str | None = None
+    default_model: str | None = None
 
 
 class CurrentModelResponse(BaseModel):

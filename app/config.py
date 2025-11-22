@@ -20,15 +20,16 @@ class Settings(BaseSettings):
     uploads_dir: Path = Path("/app/data/uploads")
 
     # Job Settings
-    job_timeout: int = 600  # 10 minutes (for model downloads)
+    job_timeout: int = 1200  # 20 minutes (for model downloads)
     job_result_ttl: int = 3600  # 1 hour
 
     # Webhook Settings
     webhook_timeout: int = 30
     webhook_max_retries: int = 3
 
-    # Default OCR model
+    # OCR Model Settings
     default_model: str = "qari"
+    preload_models: list[str] = ["qari"]  # Models to pre-download at startup
 
     @property
     def redis_url(self) -> str:

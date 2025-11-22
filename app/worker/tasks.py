@@ -38,7 +38,7 @@ def _read_file_as_base64(file_path: str | None) -> str | None:
     return None
 
 
-def process_ocr_job(job_id: str, image_path: str) -> dict:
+def process_ocr_job(job_id: str, image_path: str, engine: str | None = None) -> dict:
     """
     Process an OCR job.
 
@@ -47,6 +47,7 @@ def process_ocr_job(job_id: str, image_path: str) -> dict:
     Args:
         job_id: The job identifier.
         image_path: Path to the uploaded image.
+        engine: OCR engine to use (e.g., 'qari', 'got'). Defaults to config default.
 
     Returns:
         Dictionary with job result or error.
@@ -62,8 +63,8 @@ def process_ocr_job(job_id: str, image_path: str) -> dict:
         return {"error": "Job not found"}
 
     try:
-        # Run OCR
-        result = _run_async(model_manager.extract_text(Path(image_path)))
+        # Run OCR with specified engine
+        result = _run_async(model_manager.extract_text(Path(image_path), engine=engine))
 
         # Read output file and convert to base64
         output_file_base64 = _read_file_as_base64(result.output_file)

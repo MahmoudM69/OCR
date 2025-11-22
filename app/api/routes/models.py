@@ -11,6 +11,7 @@ from app.schemas.model import (
     SwitchModelRequest,
     SwitchModelResponse,
 )
+from app.services.model_status import get_model_status_service
 
 router = APIRouter(prefix="/models", tags=["Models"])
 
@@ -32,34 +33,34 @@ def get_current_model_from_redis() -> str | None:
 @router.get("", response_model=ModelsListResponse)
 async def list_models():
     """
-    List all available OCR models.
+    List all available OCR models and their status.
 
-    Returns registered models and indicates which ones are
-    available (have model files in the models directory).
+    Returns registered models with download/ready status.
     """
     registered_models = OCREngineRegistry.list_registered()
     current = get_current_model_from_redis()
-
-    # Check which models have files available
-    available_models = []
-    for name in registered_models:
-        model_path = settings.models_dir / name
-        if model_path.exists():
-            available_models.append(name)
+    model_status_service = get_model_status_service()
 
     models = []
     for name in registered_models:
+        model_status, message = model_status_service.get_status(name)
+        progress = model_status_service.get_progress(name)
+
         models.append(
             ModelInfo(
                 name=name,
                 is_loaded=(name == current),
-                is_available=(name in available_models),
+                is_available=(model_status.value == "ready"),
+                status=model_status.value,
+                progress=progress,
+                message=message,
             )
         )
 
     return ModelsListResponse(
         models=models,
         current_model=current,
+        default_model=settings.default_model,
     )
 
 
@@ -76,6 +77,32 @@ async def get_current_model():
         model=current,
         is_processing=False,  # API can't know if worker is processing
     )
+
+
+@router.get("/{model_name}/status")
+async def get_model_status(model_name: str):
+    """
+    Get the status of a specific model.
+
+    Returns download status, progress, and any error messages.
+    """
+    if not OCREngineRegistry.is_registered(model_name):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model '{model_name}' not found",
+        )
+
+    model_status_service = get_model_status_service()
+    model_status, message = model_status_service.get_status(model_name)
+    progress = model_status_service.get_progress(model_name)
+
+    return {
+        "model": model_name,
+        "status": model_status.value,
+        "progress": progress,
+        "message": message,
+        "is_ready": model_status.value == "ready",
+    }
 
 
 @router.post(

@@ -237,12 +237,13 @@ class OCRModelManager:
             logger.info(f"Syncing model: {local_model} -> {target_model}")
             await self.switch_model(target_model)
 
-    async def extract_text(self, image_path: Path) -> OCRResult:
+    async def extract_text(self, image_path: Path, engine: str | None = None) -> OCRResult:
         """
-        Extract text from an image using the current model.
+        Extract text from an image using the specified or current model.
 
         Args:
             image_path: Path to the image file.
+            engine: Specific engine to use. If None, uses the current model from Redis.
 
         Returns:
             OCRResult containing extracted text.
@@ -250,8 +251,15 @@ class OCRModelManager:
         Raises:
             RuntimeError: If no model is loaded.
         """
-        # Ensure we have the right model loaded
-        await self.ensure_model_loaded()
+        # If specific engine requested, ensure it's loaded
+        if engine:
+            local_model = self.current_model_local
+            if local_model != engine:
+                logger.info(f"Switching to requested engine: {engine}")
+                await self.switch_model(engine)
+        else:
+            # Ensure we have the right model loaded from Redis
+            await self.ensure_model_loaded()
 
         if self._current_engine is None or not self._current_engine.is_loaded:
             raise RuntimeError("No model is currently loaded")

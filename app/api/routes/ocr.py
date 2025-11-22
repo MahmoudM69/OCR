@@ -10,6 +10,7 @@ from app.config import settings
 from app.schemas.job import JobStatusResponse
 from app.schemas.ocr import OCRSubmitResponse
 from app.services.job_service import get_job_service
+from app.services.model_status import ModelStatus, get_model_status_service
 from app.worker.tasks import process_ocr_job
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
@@ -28,6 +29,7 @@ def get_queue() -> Queue:
 )
 async def submit_ocr(
     file: UploadFile = File(..., description="Image file to process"),
+    engine: str = Form(default=None, description="OCR engine to use (default: from config)"),
     webhook_url: str | None = Form(default=None, description="Webhook URL for completion notification"),
 ):
     """
@@ -36,6 +38,30 @@ async def submit_ocr(
     The image will be processed asynchronously. Use the returned job_id
     to poll for results or provide a webhook_url for notification.
     """
+    # Use default engine if not specified
+    model_name = engine or settings.default_model
+
+    # Check model status
+    model_status_service = get_model_status_service()
+    model_status, message = model_status_service.get_status(model_name)
+    progress = model_status_service.get_progress(model_name)
+
+    if model_status == ModelStatus.DOWNLOADING:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Model '{model_name}' is still downloading ({progress:.0f}%). Please try again later.",
+        )
+    elif model_status == ModelStatus.FAILED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Model '{model_name}' failed to load: {message}",
+        )
+    elif model_status == ModelStatus.NOT_FOUND:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Model '{model_name}' is not available. Check /models for available models.",
+        )
+
     # Validate file type
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -58,18 +84,19 @@ async def submit_ocr(
     with open(image_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Queue job
+    # Queue job with engine parameter
     queue = get_queue()
     queue.enqueue(
         process_ocr_job,
         job.id,
         str(image_path),
+        model_name,
         job_timeout=settings.job_timeout,
     )
 
     return OCRSubmitResponse(
         job_id=job.id,
-        message="Image submitted for processing",
+        message=f"Image submitted for processing with '{model_name}' engine",
     )
 
 
