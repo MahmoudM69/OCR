@@ -27,6 +27,8 @@ class OCRResult:
     """Result from OCR processing."""
 
     text: str
+    formatted_text: str = ""  # Formatted/structured output from model
+    output_file: str | None = None  # Path to output file (for internal use)
     blocks: list[TextBlock] = field(default_factory=list)
     confidence: float = 0.0
     metadata: dict = field(default_factory=dict)

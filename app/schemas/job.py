@@ -26,6 +26,11 @@ class JobResult(BaseModel):
     """Result of OCR processing."""
 
     text: str
+    formatted_text: str = ""
+    output_file_base64: str | None = Field(
+        default=None,
+        description="Base64-encoded content of the output text file",
+    )
     confidence: float = 0.0
     metadata: dict = Field(default_factory=dict)
 

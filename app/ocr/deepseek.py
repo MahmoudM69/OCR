@@ -164,8 +164,15 @@ class DeepSeekOCREngine(BaseOCREngine):
                 clean_up_tokenization_spaces=False,
             )[0]
 
+            text = output_text.strip()
+
+            # Save output to file
+            output_file_path = self._save_output_file(image_path, text)
+
             return OCRResult(
-                text=output_text.strip(),
+                text=text,
+                formatted_text=text,  # DeepSeek doesn't have separate formatting
+                output_file=output_file_path,
                 confidence=0.0,
                 metadata={
                     "engine": self.name,
@@ -177,3 +184,16 @@ class DeepSeekOCREngine(BaseOCREngine):
         except Exception as e:
             logger.error(f"DeepSeek-OCR processing failed: {e}")
             raise RuntimeError(f"OCR processing failed: {e}")
+
+    def _save_output_file(self, image_path: Path, text: str) -> str:
+        """Save OCR output to a text file."""
+        output_dir = image_path.parent.parent / "outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        output_filename = f"{image_path.stem}_ocr.txt"
+        output_path = output_dir / output_filename
+
+        output_path.write_text(text, encoding="utf-8")
+        logger.info(f"Saved OCR output to: {output_path}")
+
+        return str(output_path)

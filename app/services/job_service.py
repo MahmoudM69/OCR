@@ -124,6 +124,8 @@ class JobService:
         self,
         job_id: str,
         text: str,
+        formatted_text: str = "",
+        output_file_base64: str | None = None,
         confidence: float = 0.0,
         metadata: dict | None = None,
     ) -> Job | None:
@@ -132,7 +134,9 @@ class JobService:
 
         Args:
             job_id: The job identifier.
-            text: Extracted text.
+            text: Extracted text (plain).
+            formatted_text: Formatted text output from model.
+            output_file_base64: Base64-encoded content of the output text file.
             confidence: Confidence score.
             metadata: Additional metadata.
 
@@ -147,6 +151,8 @@ class JobService:
         job.updated_at = datetime.utcnow()
         job.result = JobResult(
             text=text,
+            formatted_text=formatted_text,
+            output_file_base64=output_file_base64,
             confidence=confidence,
             metadata=metadata or {},
         )

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 from pathlib import Path
 
@@ -21,6 +22,20 @@ def _run_async(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+
+def _read_file_as_base64(file_path: str | None) -> str | None:
+    """Read a file and return its content as base64."""
+    if not file_path:
+        return None
+    try:
+        path = Path(file_path)
+        if path.exists():
+            content = path.read_text(encoding="utf-8")
+            return base64.b64encode(content.encode("utf-8")).decode("ascii")
+    except Exception as e:
+        logger.warning(f"Failed to read output file {file_path}: {e}")
+    return None
 
 
 def process_ocr_job(job_id: str, image_path: str) -> dict:
@@ -50,10 +65,15 @@ def process_ocr_job(job_id: str, image_path: str) -> dict:
         # Run OCR
         result = _run_async(model_manager.extract_text(Path(image_path)))
 
+        # Read output file and convert to base64
+        output_file_base64 = _read_file_as_base64(result.output_file)
+
         # Store result
         job = job_service.set_result(
             job_id,
             text=result.text,
+            formatted_text=result.formatted_text,
+            output_file_base64=output_file_base64,
             confidence=result.confidence,
             metadata=result.metadata,
         )

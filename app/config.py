@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     uploads_dir: Path = Path("/app/data/uploads")
 
     # Job Settings
-    job_timeout: int = 300  # 5 minutes
+    job_timeout: int = 600  # 10 minutes (for model downloads)
     job_result_ttl: int = 3600  # 1 hour
 
     # Webhook Settings

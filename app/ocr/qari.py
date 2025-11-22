@@ -14,14 +14,8 @@ logger = logging.getLogger(__name__)
 
 MODEL_ID = "NAMAA-Space/Qari-OCR-v0.3-VL-2B-Instruct"
 
-# Arabic OCR prompt
-ARABIC_OCR_PROMPT = """أنت خبير في التعرف الضوئي على النصوص العربية. استخرج النص العربي بدقة من الصورة.
-قواعد:
-- استخرج النص العربي فقط
-- حافظ على تنسيق الفقرات
-- لا تضف أي تعليقات
-- إذا لم يوجد نص، أجب بـ "لا يوجد نص"
-"""
+# Arabic OCR prompt - simplified for better accuracy
+ARABIC_OCR_PROMPT = """استخرج النص من الصورة. اكتب النص العربي فقط بدون أي علامات HTML أو رموز أو حروف إنجليزية. النص العربي فقط."""
 
 
 @OCREngineRegistry.register
@@ -46,11 +40,11 @@ class QariOCREngine(BaseOCREngine):
         return "qari"
 
     async def load(self) -> None:
-        """Load the Qari-OCR model with 8-bit quantization."""
+        """Load the Qari-OCR model at full precision (float16)."""
         if self._loaded:
             return
 
-        logger.info(f"Loading Qari-OCR model: {MODEL_ID}")
+        logger.info(f"Loading Qari-OCR model (full precision float16): {MODEL_ID}")
 
         try:
             # Load processor
@@ -59,17 +53,35 @@ class QariOCREngine(BaseOCREngine):
                 trust_remote_code=True,
             )
 
-            # Load model with 8-bit quantization (better for Arabic accuracy)
+            # Load model at full precision (float16) for maximum accuracy
+            # The 2B model should fit in 16GB VRAM with float16 (~4GB)
+            # Using both torch_dtype and dtype to ensure compatibility
             self._model = Qwen2VLForConditionalGeneration.from_pretrained(
                 MODEL_ID,
                 trust_remote_code=True,
-                load_in_8bit=True,
+                torch_dtype=torch.float16,
                 device_map="auto",
                 low_cpu_mem_usage=True,
             )
 
             self._model.eval()
             self._loaded = True
+
+            # Print model info to verify precision (using print for visibility)
+            param = next(self._model.parameters())
+            print(f"[QARI] Model dtype: {param.dtype}", flush=True)
+            print(f"[QARI] Model device: {param.device}", flush=True)
+            if torch.cuda.is_available():
+                mem_gb = torch.cuda.memory_allocated() / 1024**3
+                print(f"[QARI] GPU memory allocated: {mem_gb:.2f} GB", flush=True)
+
+            # Check if model has quantization config
+            if hasattr(self._model.config, 'quantization_config'):
+                print(f"[QARI] Quantization config: {self._model.config.quantization_config}", flush=True)
+            else:
+                print("[QARI] No quantization config - model is at full precision", flush=True)
+
+            print("[QARI] Model loaded successfully", flush=True)
             logger.info("Qari-OCR model loaded successfully")
 
         except Exception as e:
@@ -213,8 +225,14 @@ class QariOCREngine(BaseOCREngine):
                 # Process single image
                 text = await self._process_single_image(image_path)
 
+            # For Arabic, formatted text is same as plain text
+            # Save output to file
+            output_file_path = self._save_output_file(image_path, text)
+
             return OCRResult(
                 text=text,
+                formatted_text=text,  # Arabic text doesn't need special formatting
+                output_file=output_file_path,
                 confidence=0.0,
                 metadata={
                     "engine": self.name,
@@ -228,3 +246,16 @@ class QariOCREngine(BaseOCREngine):
         except Exception as e:
             logger.error(f"Qari-OCR processing failed: {e}")
             raise RuntimeError(f"OCR processing failed: {e}")
+
+    def _save_output_file(self, image_path: Path, text: str) -> str:
+        """Save OCR output to a text file."""
+        output_dir = image_path.parent.parent / "outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        output_filename = f"{image_path.stem}_ocr.txt"
+        output_path = output_dir / output_filename
+
+        output_path.write_text(text, encoding="utf-8")
+        logger.info(f"Saved OCR output to: {output_path}")
+
+        return str(output_path)
