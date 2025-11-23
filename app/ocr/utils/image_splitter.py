@@ -1,13 +1,37 @@
+"""
+DEPRECATED: This module is deprecated in favor of app.ocr.splitting.
+
+Use the new content-aware splitting module instead:
+    from app.ocr.splitting import SmartSplitter, create_splitter
+
+The new module provides:
+- Projection profile splitting (finds whitespace gaps)
+- Connected component splitting (avoids cutting through text)
+- Grid fallback with configurable overlap
+- RTL/LTR aware result merging with deduplication
+
+This module is kept for backward compatibility only.
+"""
+
 import logging
 import math
 import shutil
 import tempfile
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# Issue deprecation warning on import
+warnings.warn(
+    "app.ocr.utils.image_splitter is deprecated. "
+    "Use app.ocr.splitting.SmartSplitter instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # Thresholds for auto-splitting
 MAX_MEGAPIXELS = 2.0

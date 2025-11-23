@@ -1,9 +1,34 @@
+"""
+DEPRECATED: This module is deprecated in favor of app.ocr.splitting and app.ocr.processor.
+
+Use the new modules instead:
+    from app.ocr.processor import ImageProcessor
+    from app.ocr.splitting import ResultMerger
+
+The new modules provide:
+- Integrated preprocessing and splitting pipeline
+- Content-aware splitting that avoids cutting through text
+- Smart result merging with fuzzy deduplication
+- Configurable per-engine settings
+
+This module is kept for backward compatibility only.
+"""
+
 import logging
 import shutil
+import warnings
 from pathlib import Path
 from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+# Issue deprecation warning on import
+warnings.warn(
+    "app.ocr.utils.ocr_processor is deprecated. "
+    "Use app.ocr.processor.ImageProcessor instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 async def process_image_chunks(
