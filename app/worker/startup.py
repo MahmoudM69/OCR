@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 MODEL_IDS = {
     "qari": "NAMAA-Space/Qari-OCR-v0.3-VL-2B-Instruct",
     "got": "stepfun-ai/GOT-OCR2_0",
-    # "deepseek": handled differently (API-based)
+    "deepseek": "unsloth/DeepSeek-OCR",
 }
 
 

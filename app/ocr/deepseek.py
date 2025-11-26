@@ -1,19 +1,40 @@
 import gc
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Optional
+from unittest.mock import patch
 
 import numpy as np
 import torch
 from PIL import Image
-from transformers import AutoModelForVision2Seq, AutoProcessor
 
 from app.ocr.base import BaseOCREngine, OCRResult
 from app.ocr.registry import OCREngineRegistry
 from app.ocr.processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
+
+
+# Store reference to original get_imports before any patching
+from transformers.dynamic_module_utils import get_imports as _original_get_imports
+
+
+def _patched_get_imports(filename: str | os.PathLike) -> list[str]:
+    """
+    Workaround for HuggingFace's get_imports not respecting conditional imports.
+
+    The original get_imports uses regex and flags conditionally-imported packages
+    as hard requirements. This patch removes packages that are optional.
+    """
+    imports = _original_get_imports(filename)
+    # Remove packages that are conditionally imported in DeepSeek model
+    optional_packages = ["flash_attn", "addict", "einops", "easydict", "matplotlib"]
+    for pkg in optional_packages:
+        if pkg in imports:
+            imports.remove(pkg)
+    return imports
 
 MODEL_ID = "unsloth/DeepSeek-OCR"
 
@@ -53,20 +74,31 @@ class DeepSeekOCREngine(BaseOCREngine):
         logger.info(f"Loading DeepSeek-OCR model: {MODEL_ID}")
 
         try:
-            # Load processor
-            self._processor = AutoProcessor.from_pretrained(
-                MODEL_ID,
-                trust_remote_code=True,
-            )
+            # Import inside try block to catch any import errors
+            from transformers import AutoModel, AutoProcessor
 
-            # Load model with 4-bit quantization
-            self._model = AutoModelForVision2Seq.from_pretrained(
-                MODEL_ID,
-                trust_remote_code=True,
-                load_in_4bit=True,
-                device_map="auto",
-                low_cpu_mem_usage=True,
-            )
+            # Use monkey-patch to bypass HuggingFace's broken import check
+            # that doesn't respect conditional imports
+            with patch(
+                "transformers.dynamic_module_utils.get_imports",
+                _patched_get_imports,
+            ):
+                # Load processor
+                self._processor = AutoProcessor.from_pretrained(
+                    MODEL_ID,
+                    trust_remote_code=True,
+                )
+
+                # Load model with 4-bit quantization
+                # Using AutoModel instead of AutoModelForVision2Seq because
+                # the model has a custom config class not recognized by the latter
+                self._model = AutoModel.from_pretrained(
+                    MODEL_ID,
+                    trust_remote_code=True,
+                    load_in_4bit=True,
+                    device_map="auto",
+                    low_cpu_mem_usage=True,
+                )
 
             self._model.eval()
             self._loaded = True

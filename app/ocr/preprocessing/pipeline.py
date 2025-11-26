@@ -14,6 +14,7 @@ from .base import PreprocessingStep, PreprocessingConfig, ImageAnalysis, StepRes
 from .analyzer import ImageQualityAnalyzer
 from .steps import (
     GrayscaleStep,
+    InvertStep,
     NormalizationStep,
     NoiseRemovalStep,
     BinarizationStep,
@@ -62,11 +63,12 @@ class PreprocessingPipeline:
 
     Default step order:
     1. Grayscale conversion
-    2. Noise removal
-    3. Deskew
-    4. Normalization
-    5. Binarization
-    6. Scaling
+    2. Invert (for light-on-dark images)
+    3. Noise removal
+    4. Deskew
+    5. Normalization
+    6. Binarization
+    7. Scaling
     """
 
     def __init__(
@@ -93,6 +95,7 @@ class PreprocessingPipeline:
         """Create the default preprocessing steps."""
         return [
             GrayscaleStep(self.config),
+            InvertStep(self.config),
             NoiseRemovalStep(self.config),
             DeskewStep(self.config),
             NormalizationStep(self.config),
