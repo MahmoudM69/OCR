@@ -108,6 +108,22 @@ class GridSplitter(BaseSplitter):
             rows = max(rows, min_splits)
             cols = max(cols, min_splits)
 
+        # Arabic/RTL mode: prefer horizontal strips (more rows, fewer columns)
+        # This minimizes vertical cuts which can break connected Arabic words
+        if getattr(self.config, 'prefer_horizontal_splits', False):
+            if cols > 1:
+                # Try to minimize columns by redistributing to rows
+                total_chunks = rows * cols
+                # Target: single column if possible, otherwise minimize columns
+                if total_chunks <= 4:
+                    # For small grids, use single column (horizontal strips)
+                    rows = total_chunks
+                    cols = 1
+                else:
+                    # For larger grids, minimize columns (max 2)
+                    cols = min(cols, 2)
+                    rows = int(np.ceil(total_chunks / cols))
+
         return max(rows, 1), max(cols, 1)
 
     def _create_overlapping_chunks(

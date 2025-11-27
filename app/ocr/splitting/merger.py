@@ -12,6 +12,33 @@ import re
 from .base import SplitResult, ImageChunk
 
 
+# Arabic diacritical marks (tashkeel) - used for normalization
+ARABIC_DIACRITICS = (
+    '\u064B'  # FATHATAN
+    '\u064C'  # DAMMATAN
+    '\u064D'  # KASRATAN
+    '\u064E'  # FATHA
+    '\u064F'  # DAMMA
+    '\u0650'  # KASRA
+    '\u0651'  # SHADDA
+    '\u0652'  # SUKUN
+    '\u0653'  # MADDAH ABOVE
+    '\u0654'  # HAMZA ABOVE
+    '\u0655'  # HAMZA BELOW
+    '\u0656'  # SUBSCRIPT ALEF
+    '\u0657'  # INVERTED DAMMA
+    '\u0658'  # MARK NOON GHUNNA
+    '\u0659'  # ZWARAKAY
+    '\u065A'  # VOWEL SIGN SMALL V ABOVE
+    '\u065B'  # VOWEL SIGN INVERTED SMALL V ABOVE
+    '\u065C'  # VOWEL SIGN DOT BELOW
+    '\u065D'  # REVERSED DAMMA
+    '\u065E'  # FATHA WITH TWO DOTS
+    '\u065F'  # WAVY HAMZA BELOW
+    '\u0670'  # SUPERSCRIPT ALEF
+)
+
+
 @dataclass
 class ChunkResult:
     """OCR result for a single chunk."""
@@ -169,9 +196,28 @@ class ResultMerger:
         # Or same column and rows differ by 1
         return (row_diff == 0 and col_diff == 1) or (row_diff == 1 and col_diff == 0)
 
+    def _normalize_arabic(self, text: str) -> str:
+        """
+        Normalize Arabic text for comparison by removing diacritics.
+
+        Arabic diacritical marks (tashkeel) like fatha, damma, kasra, etc.
+        are often inconsistently recognized by OCR. Removing them allows
+        better matching of overlapping text.
+
+        Args:
+            text: Arabic text possibly containing diacritics.
+
+        Returns:
+            Text with Arabic diacritics removed.
+        """
+        return ''.join(c for c in text if c not in ARABIC_DIACRITICS)
+
     def _remove_overlap(self, prev_text: str, current_text: str) -> str:
         """
         Remove overlapping text between consecutive chunks.
+
+        For RTL (Arabic) text, uses normalized comparison that ignores
+        diacritical marks for better matching.
 
         Args:
             prev_text: Text from previous chunk.
@@ -189,18 +235,51 @@ class ResultMerger:
         prev_end = prev_text[-500:] if len(prev_text) > 500 else prev_text
         current_start = current_text[:500] if len(current_text) > 500 else current_text
 
-        # Try to find overlapping portion
-        overlap_length = self._find_overlap_length(prev_end, current_start)
+        # For RTL (Arabic) text, use normalized comparison
+        if self.config.rtl:
+            # Normalize Arabic text (remove diacritics) for comparison
+            prev_norm = self._normalize_arabic(prev_end)
+            curr_norm = self._normalize_arabic(current_start)
 
-        if overlap_length >= min_chars:
-            # Remove the overlapping portion from current text
-            return current_text[overlap_length:].strip()
+            # Find overlap in normalized text
+            overlap_length = self._find_overlap_length(prev_norm, curr_norm)
 
-        # Try fuzzy matching for slightly different OCR results
-        fuzzy_overlap = self._find_fuzzy_overlap(prev_end, current_start)
+            if overlap_length >= min_chars:
+                # Map normalized overlap back to original text
+                # Count characters in original text until we match normalized length
+                char_count = 0
+                original_pos = 0
+                for i, c in enumerate(current_start):
+                    if c not in ARABIC_DIACRITICS:
+                        char_count += 1
+                    if char_count >= overlap_length:
+                        original_pos = i + 1
+                        break
+                return current_text[original_pos:].strip()
 
-        if fuzzy_overlap > 0:
-            return current_text[fuzzy_overlap:].strip()
+            # Try fuzzy matching with normalized text
+            fuzzy_overlap = self._find_fuzzy_overlap(prev_norm, curr_norm)
+            if fuzzy_overlap > 0:
+                # Map back to original position
+                char_count = 0
+                original_pos = 0
+                for i, c in enumerate(current_start):
+                    if c not in ARABIC_DIACRITICS:
+                        char_count += 1
+                    if char_count >= fuzzy_overlap:
+                        original_pos = i + 1
+                        break
+                return current_text[original_pos:].strip()
+        else:
+            # Standard LTR text processing
+            overlap_length = self._find_overlap_length(prev_end, current_start)
+
+            if overlap_length >= min_chars:
+                return current_text[overlap_length:].strip()
+
+            fuzzy_overlap = self._find_fuzzy_overlap(prev_end, current_start)
+            if fuzzy_overlap > 0:
+                return current_text[fuzzy_overlap:].strip()
 
         return current_text
 

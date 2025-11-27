@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings
 class SplittingConfig(BaseModel):
     """Configuration for image splitting."""
 
+    enabled: bool = Field(default=True, description="Whether splitting is enabled (False to skip splitting)")
     max_megapixels: float = Field(default=2.0, gt=0, description="Maximum megapixels before splitting is triggered")
     max_dimension: int = Field(default=2048, gt=0, description="Maximum dimension (width or height) before splitting")
     overlap_percent: float = Field(default=0.4, ge=0.0, le=1.0, description="Overlap percentage for grid fallback")
@@ -14,6 +15,7 @@ class SplittingConfig(BaseModel):
     gap_threshold: float = Field(default=0.95, ge=0.0, le=1.0, description="Threshold for detecting whitespace")
     min_chunk_size: int = Field(default=256, gt=0, description="Minimum chunk dimension to avoid tiny chunks")
     target_chunk_size: int = Field(default=1024, gt=0, description="Target chunk size when splitting")
+    prefer_horizontal_splits: bool = Field(default=False, description="Prefer horizontal strips (better for RTL text)")
 
 
 class PreprocessingConfig(BaseModel):
@@ -21,12 +23,14 @@ class PreprocessingConfig(BaseModel):
 
     enabled: bool = Field(default=True, description="Whether preprocessing is enabled")
     target_dpi: int = Field(default=300, ge=72, le=1200, description="Target DPI for scaling")
+    max_scale_factor: float = Field(default=3.0, ge=1.0, le=5.0, description="Maximum upscaling factor (1.0 = no scaling)")
     denoise_strength: int = Field(default=10, ge=0, le=20, description="Strength of denoising (0-20)")
     binarization_method: Literal["otsu", "adaptive", "none"] = Field(
         default="adaptive", description="Binarization method"
     )
     auto_deskew: bool = Field(default=True, description="Whether to automatically deskew images")
     auto_invert: bool = Field(default=True, description="Whether to automatically invert dark backgrounds")
+    preserve_color: bool = Field(default=False, description="Skip grayscale conversion (for VLM models)")
 
     # Thresholds for smart selection
     blur_threshold: float = Field(default=100.0, gt=0, description="Below this value, image is considered blurry")
@@ -71,8 +75,8 @@ class Settings(BaseSettings):
     webhook_max_retries: int = 3
 
     # OCR Model Settings
-    default_model: str = "qari"
-    preload_models: list[str] = ["qari", "deepseek"]  # Models to pre-download at startup
+    default_model: str = "deepseek"
+    preload_models: list[str] = ["deepseek"]  # Models to pre-download at startup
 
     # Global splitting settings
     splitting: SplittingConfig = SplittingConfig()
@@ -81,8 +85,22 @@ class Settings(BaseSettings):
     engine_configs: dict[str, EngineConfig] = {
         "qari": EngineConfig(
             preprocessing=PreprocessingConfig(
-                binarization_method="none",  # Arabic text often better without binarization
-                auto_deskew=True,
+                binarization_method="none",  # Arabic text better without binarization
+                auto_deskew=True,            # Keep deskew (applied globally before split)
+                auto_invert=False,           # VLM handles inverted images natively
+                denoise_strength=0,          # Disable denoising to preserve Arabic diacritics
+                preserve_color=True,         # VLM trained on color images
+                max_scale_factor=1.0,        # No upscaling - VLMs work better with original resolution
+            ),
+            splitting=SplittingConfig(
+                max_megapixels=2.5,          # Slightly more tolerant before splitting
+                max_dimension=2560,          # Allow larger images before split
+                min_chunk_size=512,          # Larger minimum (Arabic words are long)
+                target_chunk_size=1536,      # Larger target (fewer chunks)
+                overlap_percent=0.5,         # 50% overlap (connected Arabic script)
+                min_gap_pixels=20,           # Arabic has less inter-word space
+                gap_threshold=0.98,          # Stricter whitespace detection
+                prefer_horizontal_splits=True,  # Arabic reads horizontally (RTL)
             ),
         ),
         "got": EngineConfig(

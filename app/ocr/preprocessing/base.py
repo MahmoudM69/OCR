@@ -65,6 +65,9 @@ class PreprocessingConfig:
     target_dpi: int = 300
     """Target DPI for scaling."""
 
+    max_scale_factor: float = 3.0
+    """Maximum upscaling factor (1.0 = no scaling, useful for VLMs)."""
+
     denoise_strength: int = 10
     """Strength of denoising (0-20)."""
 
@@ -76,6 +79,9 @@ class PreprocessingConfig:
 
     auto_invert: bool = True
     """Whether to automatically invert dark backgrounds."""
+
+    preserve_color: bool = False
+    """Skip grayscale conversion (for Vision-Language models trained on color)."""
 
     # Thresholds for smart selection
     blur_threshold: float = 100.0
