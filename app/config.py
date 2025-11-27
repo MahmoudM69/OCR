@@ -72,7 +72,7 @@ class Settings(BaseSettings):
 
     # OCR Model Settings
     default_model: str = "qari"
-    preload_models: list[str] = ["qari"]  # Models to pre-download at startup
+    preload_models: list[str] = ["qari", "deepseek"]  # Models to pre-download at startup
 
     # Global splitting settings
     splitting: SplittingConfig = SplittingConfig()

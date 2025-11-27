@@ -1,4 +1,5 @@
-import json
+import logging
+import time
 import uuid
 from datetime import datetime
 
@@ -6,6 +7,11 @@ import redis
 
 from app.config import settings
 from app.schemas.job import Job, JobResult, JobStatus
+
+logger = logging.getLogger(__name__)
+
+# Jobs stuck in "processing" for longer than this are considered stale
+STALE_PROCESSING_THRESHOLD_SECONDS = 300  # 5 minutes
 
 
 class JobService:
@@ -176,6 +182,50 @@ class JobService:
             True if deleted, False if not found.
         """
         return self.redis.delete(self._job_key(job_id)) > 0
+
+    def cleanup_stale_processing_jobs(self) -> list[str]:
+        """
+        Clean up jobs stuck in "processing" status.
+
+        This handles cases where the worker crashed mid-processing
+        and the job status was never updated to failed.
+
+        Returns:
+            List of job IDs that were cleaned up.
+        """
+        cleaned = []
+        pattern = f"{self.JOB_PREFIX}*"
+        now = time.time()
+
+        for key in self.redis.scan_iter(pattern):
+            try:
+                data = self.redis.get(key)
+                if data is None:
+                    continue
+
+                job = self._deserialize_job(data)
+
+                if job.status == JobStatus.PROCESSING:
+                    # Check if job has been processing too long
+                    updated_timestamp = job.updated_at.timestamp()
+                    age_seconds = now - updated_timestamp
+
+                    if age_seconds > STALE_PROCESSING_THRESHOLD_SECONDS:
+                        logger.warning(
+                            f"Cleaning up stale processing job {job.id} "
+                            f"(stuck for {age_seconds:.0f}s)"
+                        )
+                        self.update_status(
+                            job.id,
+                            JobStatus.FAILED,
+                            error="Job timed out - worker may have crashed",
+                        )
+                        cleaned.append(job.id)
+
+            except Exception as e:
+                logger.error(f"Error checking job {key}: {e}")
+
+        return cleaned
 
 
 # Singleton instance

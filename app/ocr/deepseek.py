@@ -1,18 +1,15 @@
 import gc
 import logging
 import os
+import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 from unittest.mock import patch
 
-import numpy as np
 import torch
-from PIL import Image
 
 from app.ocr.base import BaseOCREngine, OCRResult
 from app.ocr.registry import OCREngineRegistry
-from app.ocr.processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +35,8 @@ def _patched_get_imports(filename: str | os.PathLike) -> list[str]:
 
 MODEL_ID = "unsloth/DeepSeek-OCR"
 
-# DeepSeek OCR prompt
-OCR_PROMPT = """Extract all text from this image accurately.
-Rules:
-- Extract text exactly as it appears
-- Maintain paragraph structure
-- Do not add any commentary
-- If no text is found, respond with "No text found"
-"""
+# DeepSeek OCR prompt - simple OCR mode for text extraction
+OCR_PROMPT = "<image>\nConvert this document to markdown. Extract all visible text accurately."
 
 
 @OCREngineRegistry.register
@@ -59,8 +50,7 @@ class DeepSeekOCREngine(BaseOCREngine):
     def __init__(self, model_path: Path):
         super().__init__(model_path)
         self._model = None
-        self._processor = None
-        self._image_processor: Optional[ImageProcessor] = None
+        self._tokenizer = None
 
     @property
     def name(self) -> str:
@@ -75,7 +65,7 @@ class DeepSeekOCREngine(BaseOCREngine):
 
         try:
             # Import inside try block to catch any import errors
-            from transformers import AutoModel, AutoProcessor
+            from transformers import AutoModel, AutoTokenizer
 
             # Use monkey-patch to bypass HuggingFace's broken import check
             # that doesn't respect conditional imports
@@ -83,15 +73,13 @@ class DeepSeekOCREngine(BaseOCREngine):
                 "transformers.dynamic_module_utils.get_imports",
                 _patched_get_imports,
             ):
-                # Load processor
-                self._processor = AutoProcessor.from_pretrained(
+                # Load tokenizer
+                self._tokenizer = AutoTokenizer.from_pretrained(
                     MODEL_ID,
                     trust_remote_code=True,
                 )
 
                 # Load model with 4-bit quantization
-                # Using AutoModel instead of AutoModelForVision2Seq because
-                # the model has a custom config class not recognized by the latter
                 self._model = AutoModel.from_pretrained(
                     MODEL_ID,
                     trust_remote_code=True,
@@ -102,9 +90,6 @@ class DeepSeekOCREngine(BaseOCREngine):
 
             self._model.eval()
             self._loaded = True
-
-            # Initialize image processor for preprocessing and splitting
-            self._image_processor = ImageProcessor(self.name)
 
             logger.info("DeepSeek-OCR model loaded successfully")
 
@@ -124,9 +109,9 @@ class DeepSeekOCREngine(BaseOCREngine):
                 del self._model
                 self._model = None
 
-            if self._processor is not None:
-                del self._processor
-                self._processor = None
+            if self._tokenizer is not None:
+                del self._tokenizer
+                self._tokenizer = None
 
             gc.collect()
             if torch.cuda.is_available():
@@ -139,67 +124,149 @@ class DeepSeekOCREngine(BaseOCREngine):
         except Exception as e:
             logger.error(f"Error unloading DeepSeek-OCR model: {e}")
 
-    async def _process_single_image(self, pil_image: Image.Image) -> str:
-        """Process a single PIL image and return text."""
-        # Prepare messages for the model
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": pil_image},
-                    {"type": "text", "text": OCR_PROMPT},
-                ],
-            }
-        ]
+    def _process_image_file(self, image_path: str, output_dir: Path) -> str:
+        """
+        Process an image file using the model's built-in infer method.
 
-        # Apply chat template
-        text = self._processor.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+        Args:
+            image_path: Path to the image file.
+            output_dir: Directory for model outputs.
 
-        # Process inputs
-        inputs = self._processor(
-            text=[text],
-            images=[pil_image],
-            padding=True,
-            return_tensors="pt",
-        )
-        inputs = inputs.to(self._model.device)
+        Returns:
+            Extracted text from the image.
+        """
+        # Validate image path
+        if not image_path:
+            raise ValueError("Image path is empty")
 
-        # Generate
-        with torch.no_grad():
-            generated_ids = self._model.generate(
-                **inputs,
-                max_new_tokens=2048,
-                do_sample=False,
-            )
+        image_file = Path(image_path)
+        if not image_file.exists():
+            raise FileNotFoundError(f"Image file not found: {image_path}")
 
-        # Decode output
-        generated_ids_trimmed = [
-            out_ids[len(in_ids):]
-            for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-        ]
+        logger.info(f"Processing image file: {image_path}")
 
-        output_text = self._processor.batch_decode(
-            generated_ids_trimmed,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )[0]
+        # Create output directory for the model
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        return output_text.strip()
+        # Use the model's built-in infer method
+        # The model prints text to low-level stdout (file descriptor 1)
+        # We need to capture at the FD level, not just sys.stdout
 
-    async def _process_chunk(self, chunk: np.ndarray) -> str:
-        """Process a single preprocessed chunk and return text."""
-        pil_image = Image.fromarray(chunk).convert("RGB")
-        return await self._process_single_image(pil_image)
+        # Create a temporary file to capture stdout
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            # Flush Python's stdout buffer
+            sys.stdout.flush()
+
+            # Save the original stdout file descriptor
+            stdout_fd = sys.stdout.fileno()
+            saved_stdout_fd = os.dup(stdout_fd)
+
+            # Open temp file and redirect stdout to it
+            with open(tmp_path, 'w') as tmp_file:
+                os.dup2(tmp_file.fileno(), stdout_fd)
+
+                try:
+                    # Call the model's infer method
+                    self._model.infer(
+                        self._tokenizer,
+                        prompt=OCR_PROMPT,
+                        image_file=str(image_file),
+                        output_path=str(output_dir),
+                        base_size=1024,
+                        image_size=640,
+                        crop_mode=True,
+                        save_results=False,
+                        test_compress=False,
+                    )
+                finally:
+                    # Restore original stdout
+                    sys.stdout.flush()
+                    os.dup2(saved_stdout_fd, stdout_fd)
+                    os.close(saved_stdout_fd)
+
+            # Read captured output
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                captured_output = f.read()
+
+            logger.info(f"Captured {len(captured_output)} chars from stdout")
+
+            # Parse the captured output to extract the OCR text
+            text = self._parse_infer_output(captured_output)
+
+            if text:
+                logger.info(f"Extracted text preview: {text[:200]}...")
+            else:
+                logger.warning(f"No text extracted. Raw output preview: {captured_output[:500]}")
+
+            return text.strip() if text else ""
+
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    def _parse_infer_output(self, stdout_text: str) -> str:
+        """
+        Parse the stdout from infer() to extract the actual OCR text.
+
+        The model prints debug info like:
+        =====================
+        BASE:  torch.Size([...])
+        PATCHES:  torch.Size([...])
+        =====================
+        <actual text here>
+        ===============save results:===============
+        ...
+
+        Args:
+            stdout_text: Captured stdout from infer().
+
+        Returns:
+            Extracted OCR text.
+        """
+        lines = stdout_text.split("\n")
+        text_lines = []
+        marker_count = 0
+        in_text_section = False
+
+        for line in lines:
+            # Count the separator markers
+            if "=====================" in line and "save" not in line.lower():
+                marker_count += 1
+                # After the second marker, we're in the text section
+                if marker_count >= 2:
+                    in_text_section = True
+                continue
+
+            # Stop at save results section
+            if "save results" in line.lower() or "===============" in line:
+                break
+
+            # Skip known debug patterns before text section
+            if not in_text_section:
+                continue
+
+            # Skip debug lines even in text section
+            if line.strip().startswith("BASE:") or line.strip().startswith("PATCHES:"):
+                continue
+
+            # Collect text lines (including empty lines for paragraph structure)
+            if in_text_section:
+                text_lines.append(line)
+
+        return "\n".join(text_lines).strip()
 
     async def extract_text(self, image_path: Path) -> OCRResult:
         """
         Extract text from an image using DeepSeek-OCR.
 
-        Uses preprocessing and content-aware splitting for large images.
+        Uses the model's built-in image handling which supports large images
+        natively without external splitting. Utilizes full GPU memory.
 
         Args:
             image_path: Path to the image file.
@@ -212,34 +279,27 @@ class DeepSeekOCREngine(BaseOCREngine):
         logger.info(f"Processing image with DeepSeek-OCR: {image_path}")
 
         try:
-            # Use the image processor for preprocessing and splitting
-            text, metadata = await self._image_processor.process_with_ocr(
-                image_path,
-                self._process_chunk,
-                rtl=False,  # DeepSeek is for general text (LTR)
-            )
+            # Output directory for model's internal use
+            output_dir = image_path.parent.parent / "outputs"
 
-            logger.info(
-                f"Processing complete. Split: {metadata.get('was_split', False)}, "
-                f"Method: {metadata.get('split_method', 'none')}"
-            )
+            # Use the model's built-in infer method directly
+            # The model handles large images internally with its own cropping logic
+            text = self._process_image_file(str(image_path), output_dir)
+
+            logger.info(f"DeepSeek-OCR processing complete for {image_path}")
 
             # Save output to file
             output_file_path = self._save_output_file(image_path, text)
 
             return OCRResult(
                 text=text,
-                formatted_text=text,  # DeepSeek doesn't have separate formatting
+                formatted_text=text,  # DeepSeek outputs markdown
                 output_file=output_file_path,
                 confidence=0.0,
                 metadata={
                     "engine": self.name,
                     "model_id": MODEL_ID,
                     "image_path": str(image_path),
-                    "was_split": metadata.get("was_split", False),
-                    "split_method": metadata.get("split_method"),
-                    "grid_shape": metadata.get("grid_shape"),
-                    "preprocessing_applied": metadata.get("preprocessing_applied", []),
                 },
             )
 
