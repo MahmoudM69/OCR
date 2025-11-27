@@ -1,13 +1,18 @@
 import gc
 import logging
+import tempfile
 from pathlib import Path
+from typing import Optional
 
+import numpy as np
 import torch
+from PIL import Image
 from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
 from transformers.cache_utils import DynamicCache
 
 from app.ocr.base import BaseOCREngine, OCRResult
 from app.ocr.registry import OCREngineRegistry
+from app.ocr.processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,7 @@ class GOTOCREngine(BaseOCREngine):
         super().__init__(model_path)
         self._model = None
         self._tokenizer = None
+        self._image_processor: Optional[ImageProcessor] = None
 
     @property
     def name(self) -> str:
@@ -111,6 +117,10 @@ class GOTOCREngine(BaseOCREngine):
             # Disable cache to avoid DynamicCache compatibility issues
             self._model.config.use_cache = False
             self._loaded = True
+
+            # Initialize image processor for preprocessing and splitting
+            self._image_processor = ImageProcessor(self.name)
+
             logger.info("GOT-OCR model loaded successfully (4-bit)")
 
         except Exception as e:
@@ -145,12 +155,56 @@ class GOTOCREngine(BaseOCREngine):
         except Exception as e:
             logger.error(f"Error unloading GOT-OCR model: {e}")
 
+    async def _process_chunk(self, chunk: np.ndarray) -> tuple[str, str]:
+        """Process a single preprocessed chunk and return (plain_text, formatted_text)."""
+        # DEBUG: Log chunk processing
+        logger.debug(f"[GOT-OCR] Processing chunk shape: {chunk.shape}, dtype: {chunk.dtype}")
+
+        tmp_path = None
+        try:
+            # Save chunk to temp file for processing
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                Image.fromarray(chunk).save(tmp_path)
+
+            # DEBUG: Log temp file creation
+            logger.debug(f"[GOT-OCR] Created temp file: {tmp_path}")
+
+            with torch.inference_mode():
+                plain_text = self._model.chat(
+                    self._tokenizer,
+                    str(tmp_path),
+                    ocr_type="ocr",
+                )
+                formatted_text = self._model.chat(
+                    self._tokenizer,
+                    str(tmp_path),
+                    ocr_type="format",
+                )
+
+            # DEBUG: Log results
+            logger.debug(f"[GOT-OCR] Extracted plain text length: {len(plain_text) if plain_text else 0}")
+            logger.debug(f"[GOT-OCR] Extracted formatted text length: {len(formatted_text) if formatted_text else 0}")
+
+            return (
+                plain_text.strip() if plain_text else "",
+                formatted_text.strip() if formatted_text else "",
+            )
+        except Exception as e:
+            # DEBUG: Log processing errors
+            logger.error(f"[GOT-OCR] Error processing chunk: {e}")
+            raise
+        finally:
+            # Ensure cleanup of temp file
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink()
+                logger.debug(f"[GOT-OCR] Cleaned up temp file: {tmp_path}")
+
     async def extract_text(self, image_path: Path) -> OCRResult:
         """
         Extract text from an image using GOT-OCR.
 
-        Performs both plain OCR and formatted OCR extraction,
-        saving the formatted output to a text file.
+        Uses preprocessing and content-aware splitting for large images.
 
         Args:
             image_path: Path to the image file.
@@ -163,24 +217,29 @@ class GOTOCREngine(BaseOCREngine):
         logger.info(f"Processing image with GOT-OCR: {image_path}")
 
         try:
-            with torch.inference_mode():
-                # Get plain text OCR result
-                plain_text = self._model.chat(
-                    self._tokenizer,
-                    str(image_path),
-                    ocr_type="ocr",
-                )
+            # Process image through preprocessor
+            processed = self._image_processor.process(image_path)
 
-                # Get formatted OCR result (preserves structure/layout)
-                formatted_text = self._model.chat(
-                    self._tokenizer,
-                    str(image_path),
-                    ocr_type="format",
-                )
+            if not processed.was_split:
+                # Single chunk - process directly
+                plain_text, formatted_text = await self._process_chunk(processed.chunks[0])
+            else:
+                # Multiple chunks - process each and merge
+                plain_texts = []
+                formatted_texts = []
 
-            # Clean up results
-            plain_text = plain_text.strip() if plain_text else ""
-            formatted_text = formatted_text.strip() if formatted_text else ""
+                for chunk in processed.chunks:
+                    pt, ft = await self._process_chunk(chunk)
+                    plain_texts.append(pt)
+                    formatted_texts.append(ft)
+
+                plain_text = "\n\n".join(plain_texts)
+                formatted_text = "\n\n".join(formatted_texts)
+
+            logger.info(
+                f"Processing complete. Split: {processed.was_split}, "
+                f"Preprocessing: {processed.preprocessing_applied}"
+            )
 
             # Save formatted output to file
             output_file_path = self._save_output_file(image_path, formatted_text)
@@ -189,11 +248,15 @@ class GOTOCREngine(BaseOCREngine):
                 text=plain_text,
                 formatted_text=formatted_text,
                 output_file=output_file_path,
-                confidence=0.0,  # GOT doesn't provide confidence scores
+                confidence=0.0,
                 metadata={
                     "engine": self.name,
                     "model_id": MODEL_ID,
                     "image_path": str(image_path),
+                    "was_split": processed.was_split,
+                    "split_method": processed.split_result.split_method if processed.split_result else None,
+                    "grid_shape": processed.grid_shape,
+                    "preprocessing_applied": processed.preprocessing_applied,
                 },
             )
 

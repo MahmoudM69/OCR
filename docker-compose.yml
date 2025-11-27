@@ -10,9 +10,11 @@ services:
       - UPLOADS_DIR=/app/data/uploads
       - DEBUG=false
       - DEFAULT_MODEL=qari
+      - HF_HOME=/root/.cache/huggingface
     volumes:
       - ./data/models:/app/data/models
       - ./data/uploads:/app/data/uploads
+      - huggingface-cache:/root/.cache/huggingface
     depends_on:
       - redis
     restart: unless-stopped
@@ -26,7 +28,8 @@ services:
       - MODELS_DIR=/app/data/models
       - UPLOADS_DIR=/app/data/uploads
       - DEFAULT_MODEL=qari
-      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_ENABLE_HF_TRANSFER=1
       - HF_HUB_DISABLE_TELEMETRY=1
       - HF_HUB_DISABLE_INTERACTIVE=1
       - TRANSFORMERS_OFFLINE=0

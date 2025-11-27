@@ -7,6 +7,8 @@ from rq import Queue
 import redis
 
 from app.config import settings
+from app.ocr.manager import CURRENT_MODEL_KEY
+from app.ocr.registry import OCREngineRegistry
 from app.schemas.job import JobStatusResponse
 from app.schemas.ocr import OCRSubmitResponse
 from app.services.job_service import get_job_service
@@ -14,6 +16,15 @@ from app.services.model_status import ModelStatus, get_model_status_service
 from app.worker.tasks import process_ocr_job
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
+
+
+def get_current_model_from_redis() -> str | None:
+    """Get the current model name from Redis."""
+    client = redis.Redis.from_url(settings.redis_url)
+    model = client.get(CURRENT_MODEL_KEY)
+    if model:
+        return model.decode('utf-8')
+    return None
 
 
 def get_queue() -> Queue:
@@ -38,10 +49,17 @@ async def submit_ocr(
     The image will be processed asynchronously. Use the returned job_id
     to poll for results or provide a webhook_url for notification.
     """
-    # Use default engine if not specified
-    model_name = engine or settings.default_model
+    # Use current model from Redis, or fall back to default
+    model_name = engine or get_current_model_from_redis() or settings.default_model
 
-    # Check model status
+    # Verify model is registered
+    if not OCREngineRegistry.is_registered(model_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Model '{model_name}' is not registered. Check /models for available models.",
+        )
+
+    # Check model status for issues that would prevent processing
     model_status_service = get_model_status_service()
     model_status, message = model_status_service.get_status(model_name)
     progress = model_status_service.get_progress(model_name)
@@ -56,11 +74,7 @@ async def submit_ocr(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Model '{model_name}' failed to load: {message}",
         )
-    elif model_status == ModelStatus.NOT_FOUND:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Model '{model_name}' is not available. Check /models for available models.",
-        )
+    # Note: NOT_FOUND is OK - the worker will load the model on demand
 
     # Validate file type
     if file.content_type and not file.content_type.startswith("image/"):

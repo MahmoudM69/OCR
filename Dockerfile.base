@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     git \
     wget \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
@@ -21,14 +23,16 @@ ENV UV_HTTP_TIMEOUT=300
 ENV PIP_DEFAULT_TIMEOUT=300
 
 # Install PyTorch with CUDA 12.4 support (compatible with 12.5)
-RUN pip install --no-cache-dir \
+# Note: --no-cache-dir removed to enable pip caching with volumes
+RUN pip install \
     torch==2.5.0 \
     torchvision \
     torchaudio \
     --index-url https://download.pytorch.org/whl/cu124
 
 # Install core ML dependencies
-RUN pip install --no-cache-dir \
+# Note: --no-cache-dir removed to enable pip caching with volumes
+RUN pip install \
     transformers \
     accelerate \
     bitsandbytes \
@@ -38,10 +42,11 @@ RUN pip install --no-cache-dir \
     protobuf
 
 # Install flash-attention (requires CUDA dev tools)
-RUN pip install --no-cache-dir flash-attn --no-build-isolation
+RUN pip install flash-attn --no-build-isolation
 
 # Install common utilities
-RUN pip install --no-cache-dir \
+# Note: --no-cache-dir removed to enable pip caching with volumes
+RUN pip install \
     pillow \
     reportlab \
     httpx \
@@ -49,8 +54,18 @@ RUN pip install --no-cache-dir \
     pydantic-settings \
     python-dotenv
 
+# Install image processing dependencies
+# Note: --no-cache-dir removed to enable pip caching with volumes
+RUN pip install \
+    opencv-python-headless \
+    numpy \
+    addict \
+    easydict \
+    matplotlib
+
 # Install API framework
-RUN pip install --no-cache-dir \
+# Note: --no-cache-dir removed to enable pip caching with volumes
+RUN pip install \
     fastapi \
     uvicorn[standard] \
     python-multipart \

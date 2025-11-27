@@ -19,8 +19,19 @@ python-dotenv==1.0.1
 pillow
 reportlab
 
+# Image processing
+opencv-python-headless
+numpy
+addict
+easydict
+matplotlib
+
 # ML/AI (core - installed in base image)
 # torch, transformers, accelerate, bitsandbytes are in base
+
+# HuggingFace model downloading
+huggingface_hub>=0.20.0
+hf-transfer>=0.1.4
 
 # Engine-specific dependencies
 tiktoken==0.6.0

@@ -8,6 +8,7 @@ import redis
 from app.config import settings
 from app.ocr.base import BaseOCREngine, OCRResult
 from app.ocr.registry import OCREngineRegistry
+from app.services.model_status import ModelStatus, get_model_status_service
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,8 @@ class OCRModelManager:
             ValueError: If the model is not registered or not available.
             RuntimeError: If loading fails.
         """
+        model_status_service = get_model_status_service()
+
         async with self._lock:
             if not OCREngineRegistry.is_registered(model_name):
                 raise ValueError(f"No engine registered for model: {model_name}")
@@ -108,14 +111,23 @@ class OCRModelManager:
 
             engine = OCREngineRegistry.create_engine(model_name, model_path)
             if engine is None:
+                model_status_service.set_status(model_name, ModelStatus.FAILED, "Failed to create engine")
                 raise RuntimeError(f"Failed to create engine for: {model_name}")
 
             logger.info(f"Loading model: {model_name}")
-            await engine.load()
+            model_status_service.set_status(model_name, ModelStatus.LOADING)
+
+            try:
+                await engine.load()
+            except Exception as e:
+                model_status_service.set_status(model_name, ModelStatus.FAILED, str(e))
+                raise
+
             self._current_engine = engine
 
             # Store current model in Redis for cross-process visibility
             self.redis.set(CURRENT_MODEL_KEY, model_name)
+            model_status_service.set_status(model_name, ModelStatus.READY)
 
             logger.info(f"Model loaded successfully: {model_name}")
 
@@ -177,6 +189,8 @@ class OCRModelManager:
             TimeoutError: If waiting for processing times out.
             RuntimeError: If switching fails.
         """
+        model_status_service = get_model_status_service()
+
         # Validate model exists before waiting
         if not OCREngineRegistry.is_registered(model_name):
             raise ValueError(f"No engine registered for model: {model_name}")
@@ -204,14 +218,23 @@ class OCRModelManager:
             # Load new model
             engine = OCREngineRegistry.create_engine(model_name, model_path)
             if engine is None:
+                model_status_service.set_status(model_name, ModelStatus.FAILED, "Failed to create engine")
                 raise RuntimeError(f"Failed to create engine for: {model_name}")
 
             logger.info(f"Loading model: {model_name}")
-            await engine.load()
+            model_status_service.set_status(model_name, ModelStatus.LOADING)
+
+            try:
+                await engine.load()
+            except Exception as e:
+                model_status_service.set_status(model_name, ModelStatus.FAILED, str(e))
+                raise
+
             self._current_engine = engine
 
             # Store current model in Redis
             self.redis.set(CURRENT_MODEL_KEY, model_name)
+            model_status_service.set_status(model_name, ModelStatus.READY)
 
             logger.info(f"Switched to model: {model_name}")
 

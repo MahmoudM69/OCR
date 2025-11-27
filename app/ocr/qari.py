@@ -1,14 +1,17 @@
 import gc
 import logging
+import tempfile
 from pathlib import Path
+from typing import Optional
 
+import numpy as np
 import torch
+from PIL import Image
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 
 from app.ocr.base import BaseOCREngine, OCRResult
 from app.ocr.registry import OCREngineRegistry
-from app.ocr.utils.image_splitter import get_image_info, split_image_grid
-from app.ocr.utils.ocr_processor import process_image_chunks, cleanup_temp_chunks
+from app.ocr.processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,7 @@ class QariOCREngine(BaseOCREngine):
         super().__init__(model_path)
         self._model = None
         self._processor = None
+        self._image_processor: Optional[ImageProcessor] = None
 
     @property
     def name(self) -> str:
@@ -66,6 +70,9 @@ class QariOCREngine(BaseOCREngine):
 
             self._model.eval()
             self._loaded = True
+
+            # Initialize image processor for preprocessing and splitting
+            self._image_processor = ImageProcessor(self.name)
 
             # Print model info to verify precision (using print for visibility)
             param = next(self._model.parameters())
@@ -174,11 +181,26 @@ class QariOCREngine(BaseOCREngine):
 
         return output_text.strip()
 
+    async def _process_chunk(self, chunk: np.ndarray) -> str:
+        """Process a single preprocessed chunk and return text."""
+        tmp_path = None
+        try:
+            # Save chunk to temp file for processing
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                Image.fromarray(chunk).save(tmp_path)
+
+            return await self._process_single_image(tmp_path)
+        finally:
+            # Cleanup temp file
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink()
+
     async def extract_text(self, image_path: Path) -> OCRResult:
         """
         Extract text from an image using Qari-OCR.
 
-        Automatically splits large images into chunks for better accuracy.
+        Uses content-aware splitting and preprocessing for optimal accuracy.
 
         Args:
             image_path: Path to the image file.
@@ -191,41 +213,18 @@ class QariOCREngine(BaseOCREngine):
         logger.info(f"Processing image with Qari-OCR: {image_path}")
 
         try:
-            # Check if image needs splitting
-            image_info = get_image_info(image_path)
+            # Use the new image processor for preprocessing and splitting
+            text, metadata = await self._image_processor.process_with_ocr(
+                image_path,
+                self._process_chunk,
+                rtl=True,  # Arabic is RTL
+            )
 
-            if image_info.needs_splitting:
-                logger.info(
-                    f"Image is {image_info.megapixels:.1f}MP, splitting into "
-                    f"{image_info.suggested_grid[0]}x{image_info.suggested_grid[1]} grid"
-                )
+            logger.info(
+                f"Processing complete. Split: {metadata.get('was_split', False)}, "
+                f"Method: {metadata.get('split_method', 'none')}"
+            )
 
-                # Split image into chunks
-                rows, cols = image_info.suggested_grid
-                chunk_paths = split_image_grid(
-                    image_path,
-                    rows=rows,
-                    cols=cols,
-                    overlap=0.1,
-                )
-
-                try:
-                    # Process chunks with RTL reading order for Arabic
-                    text = await process_image_chunks(
-                        chunk_paths,
-                        self._process_single_image,
-                        reading_order="rtl",
-                        grid_shape=(rows, cols),
-                    )
-                finally:
-                    # Cleanup temp chunks
-                    if chunk_paths:
-                        cleanup_temp_chunks(chunk_paths[0].parent)
-            else:
-                # Process single image
-                text = await self._process_single_image(image_path)
-
-            # For Arabic, formatted text is same as plain text
             # Save output to file
             output_file_path = self._save_output_file(image_path, text)
 
@@ -238,8 +237,10 @@ class QariOCREngine(BaseOCREngine):
                     "engine": self.name,
                     "model_id": MODEL_ID,
                     "image_path": str(image_path),
-                    "was_chunked": image_info.needs_splitting,
-                    "grid_shape": image_info.suggested_grid if image_info.needs_splitting else None,
+                    "was_split": metadata.get("was_split", False),
+                    "split_method": metadata.get("split_method"),
+                    "grid_shape": metadata.get("grid_shape"),
+                    "preprocessing_applied": metadata.get("preprocessing_applied", []),
                 },
             )
 
