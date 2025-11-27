@@ -2,6 +2,12 @@ FROM ocr-base:latest
 
 WORKDIR /app
 
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install all dependencies from requirements.txt
+RUN pip install -r requirements.txt
+
 # Install engine-specific dependencies
 # Note: --no-cache-dir removed to enable pip caching with volumes
 RUN pip install \

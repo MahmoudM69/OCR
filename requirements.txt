@@ -18,6 +18,7 @@ pydantic-settings==2.2.1
 python-dotenv==1.0.1
 pillow
 reportlab
+PyMuPDF==1.23.26
 
 # Image processing
 opencv-python-headless
