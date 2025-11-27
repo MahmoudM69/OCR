@@ -28,7 +28,14 @@ class ScalingStep(PreprocessingStep):
         return "scaling"
 
     def should_apply(self, image: np.ndarray, analysis: ImageAnalysis) -> bool:
-        """Apply if estimated DPI is below target."""
+        """Apply if estimated DPI is below target and scaling is allowed."""
+        # Get max scale factor from config (default 3.0, 1.0 = no scaling)
+        max_scale = getattr(self.config, 'max_scale_factor', 3.0)
+
+        # If max_scale is 1.0, scaling is disabled
+        if max_scale <= 1.0:
+            return False
+
         if analysis.estimated_dpi >= self.target_dpi:
             return False
 
@@ -39,9 +46,9 @@ class ScalingStep(PreprocessingStep):
         if self._scale_factor < 1.1:
             return False
 
-        # Don't upscale too much (diminishing returns)
-        if self._scale_factor > 3.0:
-            self._scale_factor = 3.0
+        # Don't upscale beyond configured max (default 3.0)
+        if self._scale_factor > max_scale:
+            self._scale_factor = max_scale
 
         return True
 

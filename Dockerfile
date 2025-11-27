@@ -8,6 +8,26 @@ COPY requirements.txt .
 # Install all dependencies from requirements.txt
 RUN pip install -r requirements.txt
 
+# Install engine-specific dependencies
+# Note: --no-cache-dir removed to enable pip caching with volumes
+RUN pip install \
+    tiktoken==0.6.0 \
+    verovio==4.3.1 \
+    qwen-vl-utils
+
+# Install HuggingFace model downloading dependencies
+RUN pip install \
+    huggingface_hub>=0.20.0 \
+    hf-transfer>=0.1.4
+
+# Install image processing and DeepSeek dependencies
+RUN pip install \
+    opencv-python-headless \
+    addict \
+    easydict \
+    einops \
+    matplotlib
+
 # Copy application code
 COPY app/ ./app/
 

@@ -9,7 +9,7 @@ services:
       - MODELS_DIR=/app/data/models
       - UPLOADS_DIR=/app/data/uploads
       - DEBUG=false
-      - DEFAULT_MODEL=qari
+      - DEFAULT_MODEL=deepseek
       - HF_HOME=/root/.cache/huggingface
     volumes:
       - ./data/models:/app/data/models
@@ -21,19 +21,22 @@ services:
 
   worker:
     build: .
-    command: rq worker --url redis://redis:6379/0
+    command: python -m app.worker.run_worker
+    runtime: nvidia
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - MODELS_DIR=/app/data/models
       - UPLOADS_DIR=/app/data/uploads
-      - DEFAULT_MODEL=qari
+      - DEFAULT_MODEL=deepseek
       - HF_HOME=/root/.cache/huggingface
       - HF_HUB_ENABLE_HF_TRANSFER=1
       - HF_HUB_DISABLE_TELEMETRY=1
       - HF_HUB_DISABLE_INTERACTIVE=1
       - TRANSFORMERS_OFFLINE=0
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - ./data/models:/app/data/models
       - ./data/uploads:/app/data/uploads

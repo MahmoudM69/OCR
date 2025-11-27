@@ -25,6 +25,7 @@ opencv-python-headless
 numpy
 addict
 easydict
+einops
 matplotlib
 
 # ML/AI (core - installed in base image)

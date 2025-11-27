@@ -107,6 +107,9 @@ class SplitResult:
 class SplitConfig:
     """Configuration for image splitting."""
 
+    enabled: bool = True
+    """Whether splitting is enabled (False to skip splitting entirely)."""
+
     max_megapixels: float = 2.0
     """Maximum megapixels before splitting is triggered."""
 
@@ -127,6 +130,9 @@ class SplitConfig:
 
     target_chunk_size: int = 1024
     """Target chunk size when splitting."""
+
+    prefer_horizontal_splits: bool = False
+    """Prefer horizontal strips over vertical cuts (better for RTL text like Arabic)."""
 
 
 class BaseSplitter(ABC):
