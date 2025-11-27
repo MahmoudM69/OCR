@@ -2,11 +2,11 @@ FROM ocr-base:latest
 
 WORKDIR /app
 
-# Install engine-specific dependencies
-RUN pip install --no-cache-dir \
-    tiktoken==0.6.0 \
-    verovio==4.3.1 \
-    qwen-vl-utils
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install all dependencies from requirements.txt
+RUN pip install -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
